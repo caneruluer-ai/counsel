@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { finalAnswer } from "../../../server/protocol";
 import { runCounselDaily } from "../../../server/orchestrator";
 
-
-
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const { message } = await req.json();
+  const { message } = await req.json().catch(() => ({}));
   if (!message?.trim()) {
     return NextResponse.json({ error: "message required" }, { status: 400 });
   }
