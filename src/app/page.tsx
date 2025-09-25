@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-type Source = { title:string; domain:string; url:string };
+type Source = { title: string; domain: string; url: string };
 type Msg = { speaker:string; model:string; role:string; content_md:string; sources?: Source[] };
 type FA = {
   type:"FINAL_ANSWER"; title:string; summary:string[];
@@ -11,30 +11,59 @@ type FA = {
 export default function Home() {
   const [input, setInput] = useState("");
   const [fa, setFA] = useState<FA | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
   async function run() {
     setLoading(true);
-    const res = await fetch("/api/conductor", {
-      method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ message: input })
-    });
-    const data = await res.json(); setFA(data); setLoading(false);
+    setError(null);
+    setFA(null);
+    try {
+      const res = await fetch("/api/conductor", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ message: input })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.error || data?.type !== "FINAL_ANSWER") {
+        setError(String(data?.error || `Request failed (${res.status})`));
+        return;
+      }
+      setFA(data as FA);
+    } catch (e:any) {
+      setError(e?.message || "Network error");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <main className="p-6 max-w-3xl mx-auto">
       <h1 className="text-2xl font-semibold">Counsel — Daily</h1>
+
       <div className="mt-4 flex gap-2">
-        <input className="flex-1 border rounded px-3 py-2"
+        <input
+          className="flex-1 border rounded px-3 py-2"
           placeholder="Ask anything…"
-          value={input} onChange={e=>setInput(e.target.value)} />
-        <button onClick={run} disabled={loading || !input}
-          className="px-4 py-2 rounded bg-black text-white">
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+        />
+        <button
+          onClick={run}
+          disabled={loading || !input.trim()}
+          className="px-4 py-2 rounded bg-black text-white disabled:opacity-50"
+        >
           {loading ? "Thinking…" : "Run"}
         </button>
       </div>
 
-      {fa && (
+      {error && (
+        <div className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+          <b>Oops:</b> {error}
+        </div>
+      )}
+
+      {fa?.type === "FINAL_ANSWER" && (
         <section className="mt-8 space-y-6">
           <div className="space-y-4">
             {fa.messages.map((m, i) => (
@@ -82,9 +111,10 @@ export default function Home() {
     </main>
   );
 }
+
 function badgeFor(s: string){ if (s.includes("Strategist")) return "ST"; if (s.includes("Analyst")) return "AN"; if (s.includes("Verifier")) return "VF"; if (s.includes("Creator")) return "CR"; return "AG"; }
 function mdToHtml(md: string) {
-  return md
+  return (md || "")
     .replace(/^### (.*$)/gim, "<h3>$1</h3>")
     .replace(/^## (.*$)/gim, "<h2>$1</h2>")
     .replace(/^# (.*$)/gim, "<h1>$1</h1>")
