@@ -1,3 +1,4 @@
+// src/app/api/conductor/route.ts
 import { NextResponse } from "next/server";
 import { runTeamLeadOrchestration } from "../../../server/orchestrator";
 
@@ -13,7 +14,6 @@ export async function POST(req: Request) {
     }
 
     const result = await runTeamLeadOrchestration({ userMessage: message });
-    // result has shape: { teamPlan, messages: [...] }
     return NextResponse.json(result);
   } catch (err: any) {
     console.error("Conductor error:", err);
