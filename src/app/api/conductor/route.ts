@@ -1,21 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
-import { runTeamLeadOrchestration } from "@/server/orchestrator";
+import { NextResponse } from "next/server";
+import { runTeamLeadOrchestration } from "../../../server/orchestrator";
 
-export const runtime = "nodejs";
-
-export async function POST(req: NextRequest) {
-  const { message } = await req.json().catch(() => ({}));
-  if (!message?.trim()) {
-    return NextResponse.json({ error: "message required" }, { status: 400 });
-  }
-
+export async function POST(req: Request) {
   try {
-    const result = await runTeamLeadOrchestration({
-      userMessage: message,
-    });
+    const { message } = await req.json();
+
+    if (!message || typeof message !== "string") {
+      return NextResponse.json(
+        { error: "Invalid 'message' payload" },
+        { status: 400 }
+      );
+    }
+
+    const result = await runTeamLeadOrchestration({ userMessage: message });
+    // result has shape: { teamPlan, messages: [...] }
     return NextResponse.json(result);
   } catch (err: any) {
-    console.error("Conductor error:", err?.message || err);
-    return NextResponse.json({ error: "internal_error" }, { status: 500 });
+    console.error("Conductor error:", err);
+    return NextResponse.json(
+      { error: err?.message ?? "Unknown server error" },
+      { status: 500 }
+    );
   }
 }
