@@ -1,5 +1,7 @@
+type Role = "system" | "user" | "assistant" | "tool";
+
 export type ChatMessage = {
-  role: "system" | "user" | "assistant" | "tool";
+  role: Role;
   content: string;
   name?: string;
 };
@@ -28,15 +30,16 @@ export async function callOpenAI({
     throw new Error("Missing OPENAI_API_KEY in environment.");
   }
 
+  // ✅ Ensure the prepended system message is typed as ChatMessage
   const finalMessages: ChatMessage[] = [
-    ...(system ? [{ role: "system", content: system }] : []),
+    ...(system ? ([{ role: "system", content: system }] as ChatMessage[]) : []),
     ...messages,
   ];
 
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -50,8 +53,11 @@ export async function callOpenAI({
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`OpenAI HTTP ${res.status}: ${text || res.statusText}`);
-    }
+  }
 
-  const data = await res.json();
+  const data: {
+    choices?: { message?: { content?: string } }[];
+  } = await res.json();
+
   return data?.choices?.[0]?.message?.content ?? "";
 }
