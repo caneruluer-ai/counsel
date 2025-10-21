@@ -1,11 +1,3 @@
-import OpenAI from "openai";
-
-if (!process.env.OPENAI_API_KEY) {
-  throw new Error("Missing OPENAI_API_KEY in environment.");
-}
-
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -14,15 +6,15 @@ export type ChatMessage = {
 
 type CallOpenAIArgs = {
   model: string;
-  system?: string;                // ✅ your orchestrator passes this
-  messages?: ChatMessage[];       // user/assistant turns (optional)
+  system?: string;
+  messages?: ChatMessage[];
   temperature?: number;
   max_tokens?: number;
 };
 
 /**
- * Returns the assistant text (string) to match your orchestrator’s expectations.
- * If `system` is provided, it's prepended as a system message.
+ * Minimal OpenAI caller using fetch (no SDK).
+ * Returns assistant text (string) to match orchestrator expectations.
  */
 export async function callOpenAI({
   model,
@@ -31,17 +23,35 @@ export async function callOpenAI({
   temperature,
   max_tokens,
 }: CallOpenAIArgs): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing OPENAI_API_KEY in environment.");
+  }
+
   const finalMessages: ChatMessage[] = [
     ...(system ? [{ role: "system", content: system }] : []),
     ...messages,
   ];
 
-  const completion = await client.chat.completions.create({
-    model,
-    messages: finalMessages,
-    temperature,
-    max_tokens,
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: finalMessages,
+      temperature,
+      max_tokens,
+    }),
   });
 
-  return completion.choices?.[0]?.message?.content ?? "";
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`OpenAI HTTP ${res.status}: ${text || res.statusText}`);
+    }
+
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content ?? "";
 }
