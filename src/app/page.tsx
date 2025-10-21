@@ -7,17 +7,23 @@ export default function ConductorPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-    const userMsg = { role: "user", content: input };
+  // ✅ Accepts an optional override so buttons can send canned text safely
+  const sendMessage = async (override?: string) => {
+    const content = (override ?? input).trim();
+    if (!content) return;
+
+    const userMsg = { role: "user", content };
     setMessages((m) => [...m, userMsg]);
-    setInput("");
+
+    // Only clear the input if we're sending from the input field
+    if (!override) setInput("");
+
     setLoading(true);
 
     const res = await fetch("/api/conductor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: input }),
+      body: JSON.stringify({ message: content }),
     });
 
     const data = await res.json();
@@ -63,26 +69,20 @@ export default function ConductorPage() {
                   {msg.speaker} • {msg.model}
                 </div>
               )}
-              <div className="whitespace-pre-wrap text-sm">
-                {msg.content}
-              </div>
+              <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
 
               {/* Team Lead summary actions */}
               {msg.role === "lead" && (
                 <div className="flex gap-2 mt-2">
                   <button
                     className="bg-blue-700 px-2 py-1 rounded text-xs"
-                    onClick={() =>
-                      setInput("Continue to next pass") || sendMessage()
-                    }
+                    onClick={() => sendMessage("Continue to next pass")}
                   >
                     Continue
                   </button>
                   <button
                     className="bg-gray-700 px-2 py-1 rounded text-xs"
-                    onClick={() =>
-                      setInput("Refine the current plan") || sendMessage()
-                    }
+                    onClick={() => sendMessage("Refine the current plan")}
                   >
                     Refine
                   </button>
@@ -104,7 +104,7 @@ export default function ConductorPage() {
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
         />
         <button
-          onClick={sendMessage}
+          onClick={() => sendMessage()}
           disabled={loading}
           className="bg-blue-600 px-4 py-2 rounded text-sm font-medium"
         >
@@ -114,4 +114,3 @@ export default function ConductorPage() {
     </div>
   );
 }
-
