@@ -14,23 +14,34 @@ export type ChatMessage = {
 
 type CallOpenAIArgs = {
   model: string;
-  messages: ChatMessage[];
+  system?: string;                // ✅ your orchestrator passes this
+  messages?: ChatMessage[];       // user/assistant turns (optional)
   temperature?: number;
   max_tokens?: number;
 };
 
+/**
+ * Returns the assistant text (string) to match your orchestrator’s expectations.
+ * If `system` is provided, it's prepended as a system message.
+ */
 export async function callOpenAI({
   model,
-  messages,
+  system,
+  messages = [],
   temperature,
   max_tokens,
-}: CallOpenAIArgs) {
+}: CallOpenAIArgs): Promise<string> {
+  const finalMessages: ChatMessage[] = [
+    ...(system ? [{ role: "system", content: system }] : []),
+    ...messages,
+  ];
+
   const completion = await client.chat.completions.create({
     model,
-    messages,
+    messages: finalMessages,
     temperature,
     max_tokens,
   });
 
-  return completion;
+  return completion.choices?.[0]?.message?.content ?? "";
 }
