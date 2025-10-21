@@ -1,4 +1,3 @@
-// src/server/prompts/teamLead.ts
 export const TEAM_LEAD_PROMPT = `
 You are **Team Lead**, an expert orchestrator of AI teams.
 
