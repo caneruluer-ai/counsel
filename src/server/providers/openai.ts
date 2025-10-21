@@ -17,13 +17,8 @@ type CallOpenAIArgs = {
   messages: ChatMessage[];
   temperature?: number;
   max_tokens?: number;
-  // Add optional fields here as your orchestrator needs them
 };
 
-/**
- * Minimal adapter used by orchestrator.ts
- * Returns the raw OpenAI ChatCompletion so orchestrator can read choices[0].message
- */
 export async function callOpenAI({
   model,
   messages,
