@@ -14,7 +14,7 @@
     "undici": "^6.19.8",
     "zod": "^3.23.8",
     "@supabase/supabase-js": "^2.45.4",
-    "openai": "^4.53.0",
+    "openai": "^4.53.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
