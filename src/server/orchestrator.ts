@@ -1,6 +1,11 @@
 import { TEAM_LEAD_PROMPT } from "./prompts/teamLead";
-import { callOpenAI } from "./providers/openai"; // you already have this file
-import { webSearch } from "./tools/websearch";   // you already have this file
+import { callOpenAI } from "./providers/openai";
+import { webSearch } from "./tools/websearch";
+import {
+  discoverAvailableModels,
+  resolveModel,
+  pickModel,
+} from "./models/registry";
 
 type Agent = {
   role: string;
@@ -23,7 +28,7 @@ function parseTeamPlan(text: string): TeamPlan {
   const passesLine = planBlock.match(/passes:\s*\[([\s\S]*?)\]/i)?.[1] || "";
   const passes = passesLine
     .split(",")
-    .map(s => s.replace(/["'\s]/g, ""))
+    .map((s) => s.replace(/["'\s]/g, ""))
     .filter(Boolean);
   const roster: Agent[] = [];
 
@@ -36,23 +41,34 @@ function parseTeamPlan(text: string): TeamPlan {
     const prompt = obj.match(/prompt:\s*"(.*?)"/is)?.[1]?.trim() || "";
     const toolsRaw = obj.match(/tools:\s*\[([\s\S]*?)\]/i)?.[1] || "";
     const tools = toolsRaw
-      ? toolsRaw.split(",").map(s => s.replace(/["'\s]/g, "")).filter(Boolean)
+      ? toolsRaw.split(",").map((s) => s.replace(/["'\s]/g, "")).filter(Boolean)
       : [];
     if (role && model) roster.push({ role, model, prompt, tools });
   }
 
-  return { goal, passes: passes.length ? passes : ["Plan", "Create", "Verify"], roster };
+  return {
+    goal,
+    passes: passes.length ? passes : ["Plan", "Create", "Verify"],
+    roster,
+  };
 }
 
 async function callModel(model: string, system: string, user: string) {
-  // For MVP we route everything through OpenAI; your `callOpenAI` supports models like "gpt-4o", "gpt-5".
-  // If you later add Anthropic/Gemini, switch on model prefix here.
   return await callOpenAI({
     model,
     system,
     messages: [{ role: "user", content: user }],
   });
 }
+
+// tiny helper to list models once (used by discoverAvailableModels)
+const fetchJSON = async (url: string) => {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY!}` },
+  });
+  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
+  return res.json();
+};
 
 export async function runTeamLeadOrchestration(opts: {
   userMessage: string;
@@ -61,33 +77,56 @@ export async function runTeamLeadOrchestration(opts: {
 }) {
   const { userMessage, history = [] } = opts;
 
-  // 1) Ask Team Lead to design the team and begin Pass 1
-  const leadOutput = await callModel(
-    process.env.COUNSEL_LEAD_MODEL || "gpt-5",
-    TEAM_LEAD_PROMPT,
-    userMessage
-  );
+  // 🔎 1) Discover which OpenAI models your key can actually use (cached per runtime)
+  const available = await discoverAvailableModels(fetchJSON);
+
+  // 🤝 2) Ask Team Lead to design the team (safely pick a lead model)
+  const requestedLead = process.env.COUNSEL_LEAD_MODEL || "gpt-5";
+  const leadModel = resolveModel(requestedLead, available);
+
+  const leadOutput = await callModel(leadModel, TEAM_LEAD_PROMPT, userMessage);
 
   const plan = parseTeamPlan(leadOutput);
   if (!plan.roster.length) {
     // fallback minimal roster
     plan.roster = [
-      { role: "Strategist", model: "gpt-5", prompt: "Provide a crisp plan for the user's goal." },
-      { role: "Creator", model: "gpt-4o", prompt: "Turn the plan into a concise deliverable for the user." },
-      { role: "Devil's Advocate", model: "gpt-4o-mini", prompt: "List top 3 risks or missing data and fixes." }
+      {
+        role: "Strategist",
+        model: resolveModel("gpt-5", available),
+        prompt: "Provide a crisp plan for the user's goal.",
+      },
+      {
+        role: "Creator",
+        model: resolveModel("gpt-4o", available),
+        prompt: "Turn the plan into a concise deliverable for the user.",
+      },
+      {
+        role: "Devil's Advocate",
+        model: resolveModel("gpt-4o-mini", available),
+        prompt: "List top 3 risks or missing data and fixes.",
+      },
     ];
   }
 
-  // 2) Run "Pass 1" messages for each agent (short turns)
-  const agentMessages: Array<{ role: string; model: string; content: string }> = [];
+  // ensure every agent's chosen model is resolvable/fallback-safe
+  plan.roster = plan.roster.map((a) => ({
+    ...a,
+    model: resolveModel(a.model || pickModel(["reasoning"]), available),
+  }));
+
+  // 🗣️ 3) Run Pass 1 for each agent, emitting short outputs
+  const agentMessages: Array<{ role: string; model: string; content: string }> =
+    [];
 
   for (const agent of plan.roster) {
     if (agent.tools?.includes("web")) {
-      // if Team Lead gave the Analyst "web", do a quick search to seed context (very light)
       try {
         const q = plan.goal || userMessage;
         const web = await webSearch(q);
-        const top3 = web.slice(0, 3).map(r => `- ${r.title} (${r.url})`).join("\n");
+        const top3 = web
+          .slice(0, 3)
+          .map((r) => `- ${r.title} (${r.url})`)
+          .join("\n");
         const content = await callModel(
           agent.model,
           agent.prompt,
@@ -96,7 +135,7 @@ export async function runTeamLeadOrchestration(opts: {
         agentMessages.push({ role: agent.role, model: agent.model, content });
         continue;
       } catch {
-        // fallthrough to normal call if web search fails
+        // ignore web failure, fall through
       }
     }
 
@@ -108,19 +147,23 @@ export async function runTeamLeadOrchestration(opts: {
     agentMessages.push({ role: agent.role, model: agent.model, content });
   }
 
-  // 3) Team Lead summary after the agents speak
-  const leadSummary = await callModel(
+  // 🧠 4) Team Lead summary after the agents speak (also model-resolved)
+  const summaryModel = resolveModel(
     process.env.COUNSEL_LEAD_MODEL || "gpt-5",
+    available
+  );
+  const leadSummary = await callModel(
+    summaryModel,
     "You are Team Lead. Summarize the team's outputs into a next-step recommendation. If conflicts exist, present 2 clear options.",
-    agentMessages.map(m => `${m.role}: ${m.content}`).join("\n\n")
+    agentMessages.map((m) => `${m.role}: ${m.content}`).join("\n\n")
   );
 
-  // 4) Return for UI
+  // 📤 5) Return for UI
   return {
     teamPlan: plan,
     messages: [
       { role: "system", content: "<TEAM_PLAN_READY>" },
-      ...agentMessages.map(m => ({
+      ...agentMessages.map((m) => ({
         role: "agent",
         speaker: m.role,
         model: m.model,
@@ -129,9 +172,11 @@ export async function runTeamLeadOrchestration(opts: {
       {
         role: "lead",
         speaker: "Team Lead",
-        model: process.env.COUNSEL_LEAD_MODEL || "gpt-5",
+        model: summaryModel,
         content: leadSummary,
       },
     ],
   };
 }
+
+
